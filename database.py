@@ -14,7 +14,21 @@ class Database:
     
     def __init__(self, db_path='bot.db'):
         """Инициализация подключения к базе данных."""
-        self.db_path = db_path
+        # Используем директорию data, если установлена переменная DOCKER_ENV или DATA_DIR
+        data_dir = os.getenv('DATA_DIR', 'data')
+        docker_env = os.getenv('DOCKER_ENV', '').lower() in ('true', '1', 'yes')
+        
+        if docker_env or os.getenv('DATA_DIR'):
+            # В Docker или если указана DATA_DIR - используем её
+            os.makedirs(data_dir, exist_ok=True)
+            self.db_path = os.path.join(data_dir, db_path)
+        elif os.path.exists('data'):
+            # Если директория data существует локально - используем её
+            os.makedirs('data', exist_ok=True)
+            self.db_path = os.path.join('data', db_path)
+        else:
+            # Иначе используем текущую директорию
+            self.db_path = db_path
         self.conn = None
     
     def get_connection(self):

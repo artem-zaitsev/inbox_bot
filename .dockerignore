@@ -27,12 +27,11 @@ wheels/
 *.db
 *.sqlite
 *.sqlite3
+data/
 
 # Environment variables
 .env
 .env.local
-.env.*
-*.env
 
 # IDE
 .vscode/
@@ -44,3 +43,17 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation (опционально, можно оставить)
+# README.md
+# CONTEXT.md
+# DESCRIPTION.md

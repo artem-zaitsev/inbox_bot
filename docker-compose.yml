@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inbox_bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - DOCKER_ENV=true
+      - DATA_DIR=/app/data
+    volumes:
+      # Монтируем директорию для базы данных, чтобы данные сохранялись
+      - ./data:/app/data
+      # Опционально: монтируем код для разработки (закомментируйте в продакшене)
+      # - ./bot.py:/app/bot.py
+      # - ./database.py:/app/database.py
+      # - ./notion_api.py:/app/notion_api.py
+    networks:
+      - bot_network
+
+networks:
+  bot_network:
+    driver: bridge

@@ -26,7 +26,7 @@
 
 3. **Настройте переменные окружения:**
    
-   Создайте файл `.env` в корне проекта или экспортируйте переменную:
+   Создайте файл `.env` в корне проекта (можно скопировать из `example.env`) или экспортируйте переменную:
    ```bash
    export TELEGRAM_BOT_TOKEN="ваш_токен_бота"
    ```
@@ -34,6 +34,11 @@
    Или создайте файл `.env`:
    ```
    TELEGRAM_BOT_TOKEN=ваш_токен_бота
+   ```
+
+   Быстрый способ:
+   ```bash
+   cp example.env .env
    ```
 
 ## Получение токенов
@@ -68,6 +73,8 @@
 
 ## Запуск
 
+### Локальный запуск
+
 ```bash
 python bot.py
 ```
@@ -77,6 +84,67 @@ python bot.py
 ```bash
 TELEGRAM_BOT_TOKEN="ваш_токен" python bot.py
 ```
+
+### Запуск в Docker
+
+#### Требования
+- Docker и Docker Compose установлены на вашей системе
+
+#### Быстрый старт
+
+1. **Создайте файл `.env` в корне проекта:**
+   ```bash
+   echo "TELEGRAM_BOT_TOKEN=ваш_токен_бота" > .env
+   ```
+
+2. **Соберите и запустите контейнер:**
+   ```bash
+   docker-compose up -d
+   ```
+
+3. **Просмотр логов:**
+   ```bash
+   docker-compose logs -f
+   ```
+
+4. **Остановка контейнера:**
+   ```bash
+   docker-compose down
+   ```
+
+#### Альтернативный способ (без docker-compose)
+
+1. **Соберите образ:**
+   ```bash
+   docker build -t inbox-bot .
+   ```
+
+2. **Запустите контейнер:**
+   ```bash
+   docker run -d \
+     --name inbox_bot \
+     --restart unless-stopped \
+     -e TELEGRAM_BOT_TOKEN="ваш_токен_бота" \
+     -v $(pwd)/data:/app/data \
+     inbox-bot
+   ```
+
+3. **Просмотр логов:**
+   ```bash
+   docker logs -f inbox_bot
+   ```
+
+4. **Остановка контейнера:**
+   ```bash
+   docker stop inbox_bot
+   docker rm inbox_bot
+   ```
+
+#### Важные замечания для Docker
+
+- База данных сохраняется в директории `./data` на хосте (монтируется как volume)
+- Переменные окружения можно задать через файл `.env` или флаг `-e`
+- Для перезапуска после изменений кода пересоберите образ: `docker-compose build --no-cache`
 
 ## Использование
 
@@ -107,7 +175,11 @@ inbox_bot/
 ├── database.py         # Работа с базой данных
 ├── notion_api.py       # Интеграция с Notion API
 ├── requirements.txt    # Зависимости Python
+├── Dockerfile          # Docker образ для контейнеризации
+├── docker-compose.yml  # Конфигурация Docker Compose
+├── .dockerignore       # Исключения для Docker сборки
 ├── README.md          # Документация
+├── data/              # Директория для базы данных (создается автоматически)
 └── bot.db             # База данных SQLite (создается автоматически)
 ```
 
