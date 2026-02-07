@@ -171,11 +171,11 @@ class NotionClient:
             # Получаем ID дочерних блоков страницы
             children = self.client.blocks.children.list(page_id)
             
-            # Создаем новый блок с текстом
+            # Создаем новый блок с текстом (чекбокс)
             new_block = {
                 "object": "block",
-                "type": "paragraph",
-                "paragraph": {
+                "type": "to_do",
+                "to_do": {
                     "rich_text": [
                         {
                             "type": "text",
@@ -183,7 +183,8 @@ class NotionClient:
                                 "content": content
                             }
                         }
-                    ]
+                    ],
+                    "checked": False
                 }
             }
             
