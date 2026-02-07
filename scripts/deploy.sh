@@ -9,7 +9,20 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Определяем команду docker compose (поддержка старых и новых версий)
+if command -v docker-compose &> /dev/null; then
+    DOCKER_COMPOSE="docker-compose"
+elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    DOCKER_COMPOSE="docker compose"
+else
+    echo -e "${RED}❌ Docker Compose не найден!${NC}"
+    echo -e "${YELLOW}💡 Установите Docker Compose:${NC}"
+    echo "   https://docs.docker.com/compose/install/"
+    exit 1
+fi
+
 echo -e "${BLUE}🚀 Начало развёртывания...${NC}"
+echo -e "${BLUE}🐳 Используется команда: ${DOCKER_COMPOSE}${NC}"
 echo ""
 
 # Проверка наличия .env
@@ -39,27 +52,22 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-if ! command -v docker-compose &> /dev/null; then
-    echo -e "${RED}❌ Docker Compose не установлен!${NC}"
-    exit 1
-fi
-
 echo -e "${GREEN}✅ Docker найден${NC}"
 
 # Остановка старых контейнеров
 echo ""
 echo -e "${YELLOW}🛑 Остановка старых контейнеров...${NC}"
-docker-compose down 2>/dev/null || true
+$DOCKER_COMPOSE down 2>/dev/null || true
 
 # Удаление старых образов (опционально)
 echo ""
 echo -e "${YELLOW}🧹 Очистка старых образов...${NC}"
-docker-compose rm -f 2>/dev/null || true
+$DOCKER_COMPOSE rm -f 2>/dev/null || true
 
 # Сборка нового образа
 echo ""
 echo -e "${YELLOW}🔨 Сборка Docker образа...${NC}"
-docker-compose build --no-cache
+$DOCKER_COMPOSE build --no-cache
 
 echo -e "${GREEN}✅ Образ собран${NC}"
 
@@ -74,7 +82,7 @@ fi
 # Запуск контейнера
 echo ""
 echo -e "${YELLOW}🚀 Запуск контейнера...${NC}"
-docker-compose up -d
+$DOCKER_COMPOSE up -d
 
 echo -e "${GREEN}✅ Контейнер запущен${NC}"
 
@@ -83,15 +91,15 @@ echo ""
 echo -e "${YELLOW}⏳ Проверка статуса (ожидание 5 сек)...${NC}"
 sleep 5
 
-if docker-compose ps | grep -q "Up"; then
+if $DOCKER_COMPOSE ps | grep -q "Up"; then
     echo ""
     echo -e "${GREEN}✅ Бот успешно развёрнут и работает!${NC}"
     echo ""
     echo -e "${BLUE}📊 Информация о контейнере:${NC}"
-    docker-compose ps
+    $DOCKER_COMPOSE ps
     echo ""
     echo -e "${BLUE}📋 Первые логи:${NC}"
-    docker-compose logs --tail=20 bot
+    $DOCKER_COMPOSE logs --tail=20 bot
     echo ""
     echo -e "${GREEN}🎉 Развёртывание завершено успешно!${NC}"
     echo ""
@@ -104,6 +112,6 @@ else
     echo ""
     echo -e "${RED}❌ Контейнер не запустился!${NC}"
     echo -e "${YELLOW}📋 Логи ошибок:${NC}"
-    docker-compose logs bot
+    $DOCKER_COMPOSE logs bot
     exit 1
 fi
