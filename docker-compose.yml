@@ -7,8 +7,9 @@ services:
       dockerfile: Dockerfile
     container_name: inbox_bot
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - DOCKER_ENV=true
       - DATA_DIR=/app/data
     volumes:
