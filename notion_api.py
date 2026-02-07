@@ -206,3 +206,53 @@ class NotionClient:
                 raise Exception("Нет доступа к странице. Убедитесь, что интеграция добавлена на страницу.")
             else:
                 raise Exception(f"Ошибка при записи в Notion: {error_msg}")
+
+    def get_page_content(self, page_id: str, limit: int = 20) -> list:
+        """
+        Получить содержимое страницы (последние N блоков).
+
+        Returns:
+            list: Список кортежей (text, is_checked)
+                  is_checked: True/False для to_do, None для paragraph
+        """
+        if not self.client:
+            raise ValueError("Токен не установлен")
+
+        try:
+            # Получаем блоки
+            blocks = self.client.blocks.children.list(page_id)
+            results = blocks.get('results', [])
+
+            notes = []
+            for block in results:
+                block_type = block.get('type')
+
+                if block_type == 'to_do':
+                    # Чекбокс
+                    todo_data = block.get('to_do', {})
+                    text = self._extract_text_from_rich_text(todo_data.get('rich_text', []))
+                    checked = todo_data.get('checked', False)
+                    if text:  # Пропускаем пустые
+                        notes.append((text, checked))
+
+                elif block_type == 'paragraph':
+                    # Обычный текст
+                    para_data = block.get('paragraph', {})
+                    text = self._extract_text_from_rich_text(para_data.get('rich_text', []))
+                    if text:
+                        notes.append((text, None))
+
+            # Берём последние N записей
+            return notes[-limit:] if len(notes) > limit else notes
+
+        except Exception as e:
+            logger.error(f"Ошибка при получении содержимого: {e}")
+            raise
+
+    def _extract_text_from_rich_text(self, rich_text: list) -> str:
+        """Извлечь текст из rich_text массива."""
+        text_parts = []
+        for item in rich_text:
+            if item.get('type') == 'text':
+                text_parts.append(item.get('text', {}).get('content', ''))
+        return ''.join(text_parts)

@@ -244,6 +244,52 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def list_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать список заметок из Notion."""
+    user_id = update.effective_user.id
+    
+    # Проверяем конфигурацию
+    config = db.get_user_config(user_id)
+    if not config or not config.get('notion_token') or not config.get('page_id'):
+        await update.message.reply_text(
+            "⚠️ Бот не настроен. Используйте /start для начала настройки."
+        )
+        return
+    
+    try:
+        # Устанавливаем токен
+        notion_client.set_token(config['notion_token'])
+        
+        # Получаем заметки
+        notes = notion_client.get_page_content(config['page_id'], limit=20)
+        
+        if not notes:
+            await update.message.reply_text("📭 Заметок пока нет")
+            return
+        
+        # Форматируем вывод
+        lines = [f"📋 Ваши последние заметки ({len(notes)}):\n"]
+        
+        for text, is_checked in notes:
+            if is_checked is True:
+                checkbox = "☑"
+            elif is_checked is False:
+                checkbox = "☐"
+            else:
+                checkbox = "•"  # Для paragraph
+            lines.append(f"{checkbox} {text}")
+        
+        message = "\n".join(lines)
+        await update.message.reply_text(message)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении заметок: {e}")
+        await update.message.reply_text(
+            f"❌ Ошибка при получении заметок: {str(e)}\n\n"
+            "Попробуйте позже или используйте /reset для перенастройки."
+        )
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Отмена текущей операции."""
     await update.message.reply_text(
@@ -258,6 +304,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📖 Справка по использованию бота:\n\n"
         "Команды:\n"
         "• /start - Начать настройку бота\n"
+        "• /list - Показать последние 20 заметок\n"
         "• /reset - Сбросить текущую конфигурацию\n"
         "• /help - Показать эту справку\n\n"
         "Использование:\n"
@@ -296,6 +343,7 @@ def main():
     
     # Регистрируем обработчики
     application.add_handler(setup_handler)
+    application.add_handler(CommandHandler('list', list_notes))
     application.add_handler(CommandHandler('reset', reset))
     application.add_handler(CommandHandler('help', help_command))
     application.add_handler(
