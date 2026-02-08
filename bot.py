@@ -565,6 +565,9 @@ def main():
     # Создаем приложение
     application = Application.builder().token(bot_token).build()
     
+    # Инициализируем базу данных сначала (с миграциями)
+    db.init_database()
+    
     # Инициализируем менеджер уведомлений
     notification_manager = NotificationManager(db, notion_client, application.bot)
     notification_manager.start()
@@ -613,9 +616,6 @@ def main():
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     )
-    
-    # Инициализируем базу данных
-    db.init_database()
     
     # Запускаем бота
     logger.info("Бот запущен...")
