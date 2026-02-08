@@ -61,6 +61,7 @@ class Database:
         conn.commit()
 
         # Запускаем миграции
+        self.migrate_add_notification_fields()
         self.migrate_add_version_field()
         self.migrate_from_intro_shown()
 
@@ -227,6 +228,31 @@ class Database:
             cursor.execute("ALTER TABLE users ADD COLUMN last_seen_version TEXT DEFAULT '0.0.0'")
             conn.commit()
             logger.info("Добавлено поле last_seen_version")
+
+    def migrate_add_notification_fields(self):
+        """Миграция: добавить поля для уведомлений если их нет."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Проверяем существование полей
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [row['name'] for row in cursor.fetchall()]
+        
+        # Добавляем недостающие поля
+        if 'notification_enabled' not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN notification_enabled BOOLEAN DEFAULT 0")
+            conn.commit()
+            logger.info("Добавлено поле notification_enabled")
+        
+        if 'notification_time' not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN notification_time TEXT")
+            conn.commit()
+            logger.info("Добавлено поле notification_time")
+        
+        if 'notification_days' not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN notification_days TEXT DEFAULT '1,2,3,4,5'")
+            conn.commit()
+            logger.info("Добавлено поле notification_days")
 
     def migrate_from_intro_shown(self):
         """Миграция: перенести данные из notification_intro_shown в last_seen_version."""
