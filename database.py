@@ -39,10 +39,10 @@ class Database:
         return self.conn
     
     def init_database(self):
-        """Инициализация структуры базы данных."""
+        """Инициализация структуры базы данных с миграциями."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -52,13 +52,18 @@ class Database:
                 notification_enabled BOOLEAN DEFAULT 0,
                 notification_time TEXT,
                 notification_days TEXT DEFAULT '1,2,3,4,5',
-                notification_intro_shown BOOLEAN DEFAULT 0,
+                last_seen_version TEXT DEFAULT '0.0.0',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
+
         conn.commit()
+
+        # Запускаем миграции
+        self.migrate_add_version_field()
+        self.migrate_from_intro_shown()
+
         logger.info("База данных инициализирована")
     
     def get_user_config(self, user_id: int) -> dict:
@@ -146,7 +151,7 @@ class Database:
         cursor = conn.cursor()
         
         cursor.execute(
-            'SELECT notification_enabled, notification_time, notification_days, notification_intro_shown FROM users WHERE user_id = ?',
+            'SELECT notification_enabled, notification_time, notification_days, last_seen_version FROM users WHERE user_id = ?',
             (user_id,)
         )
         
@@ -156,23 +161,38 @@ class Database:
                 'notification_enabled': bool(row['notification_enabled']),
                 'notification_time': row['notification_time'],
                 'notification_days': row['notification_days'],
-                'notification_intro_shown': bool(row['notification_intro_shown'])
+                'last_seen_version': row['last_seen_version']
             }
         return {}
 
-    def mark_intro_shown(self, user_id: int):
-        """Отметить что приветствие о новой функции показано."""
+    def get_user_version(self, user_id: int) -> str:
+        """Получить последнюю просмотренную версию пользователя."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            'SELECT last_seen_version FROM users WHERE user_id = ?',
+            (user_id,)
+        )
+        
+        row = cursor.fetchone()
+        if row and row['last_seen_version']:
+            return row['last_seen_version']
+        return '0.0.0'
+
+    def set_user_version(self, user_id: int, version: str):
+        """Установить версию для пользователя."""
         conn = self.get_connection()
         cursor = conn.cursor()
         
         cursor.execute('''
             UPDATE users
-            SET notification_intro_shown = 1, updated_at = CURRENT_TIMESTAMP
+            SET last_seen_version = ?, updated_at = CURRENT_TIMESTAMP
             WHERE user_id = ?
-        ''', (user_id,))
+        ''', (version, user_id))
         
         conn.commit()
-        logger.info(f"Приветствие отмечено как показанное для пользователя {user_id}")
+        logger.info(f"Версия {version} установлена для пользователя {user_id}")
 
     def get_users_with_notifications(self) -> list:
         """Получить всех пользователей с включенными уведомлениями."""
@@ -193,3 +213,69 @@ class Database:
             }
             for row in cursor.fetchall()
         ]
+
+    def migrate_add_version_field(self):
+        """Миграция: добавить поле last_seen_version."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Проверяем существование поля
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [row['name'] for row in cursor.fetchall()]
+        
+        if 'last_seen_version' not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN last_seen_version TEXT DEFAULT '0.0.0'")
+            conn.commit()
+            logger.info("Добавлено поле last_seen_version")
+
+    def migrate_from_intro_shown(self):
+        """Миграция: перенести данные из notification_intro_shown в last_seen_version."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Проверяем существование старого поля
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [row['name'] for row in cursor.fetchall()]
+        
+        if 'notification_intro_shown' in columns:
+            # Для пользователей с intro_shown=1 ставим версию 1.1.0
+            cursor.execute('''
+                UPDATE users 
+                SET last_seen_version = '1.1.0' 
+                WHERE notification_intro_shown = 1
+            ''')
+            conn.commit()
+            
+            # Создаем новую таблицу без старого поля (SQLite не поддерживает DROP COLUMN)
+            cursor.execute('''
+                CREATE TABLE users_new (
+                    user_id INTEGER PRIMARY KEY,
+                    notion_token TEXT,
+                    page_id TEXT,
+                    page_name TEXT,
+                    notification_enabled BOOLEAN DEFAULT 0,
+                    notification_time TEXT,
+                    notification_days TEXT DEFAULT '1,2,3,4,5',
+                    last_seen_version TEXT DEFAULT '0.0.0',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            cursor.execute('''
+                INSERT INTO users_new (
+                    user_id, notion_token, page_id, page_name,
+                    notification_enabled, notification_time, notification_days,
+                    last_seen_version, created_at, updated_at
+                )
+                SELECT 
+                    user_id, notion_token, page_id, page_name,
+                    notification_enabled, notification_time, notification_days,
+                    COALESCE(last_seen_version, '0.0.0'), created_at, updated_at
+                FROM users
+            ''')
+            
+            cursor.execute('DROP TABLE users')
+            cursor.execute('ALTER TABLE users_new RENAME TO users')
+            conn.commit()
+            logger.info("Миграция notification_intro_shown -> last_seen_version завершена")

@@ -19,6 +19,7 @@ from telegram.ext import (
 from database import Database
 from notion_api import NotionClient
 from notifications import NotificationManager
+from version import VERSION, is_newer_version, should_show_notifications_intro, get_changelog_message
 
 # Настройка логирования
 logging.basicConfig(
@@ -102,13 +103,18 @@ def get_notifications_actions_keyboard():
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Обработчик команды /start."""
+    """Обработчик команды /start с проверкой версии."""
     user_id = update.effective_user.id
-    
-    # Проверяем, есть ли уже сохраненная конфигурация
+
+    # Проверяем есть ли уже сохраненная конфигурация
     config = db.get_user_config(user_id)
-    
+
     if config and config.get('notion_token') and config.get('page_id'):
+        # Пользователь уже настроен - проверяем версию
+        result = await check_and_show_changelog(update, context)
+        if result is not None:
+            return result
+
         await update.message.reply_text(
             "✅ Вы уже настроили бота!\n\n"
             "Ваша конфигурация:\n"
@@ -117,7 +123,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             "Используйте /reset для перенастройки."
         )
         return ConversationHandler.END
-    
+
+    # Новый пользователь - устанавливаем текущую версию
+    db.set_user_version(user_id, VERSION)
+
     await update.message.reply_text(
         "👋 Привет! Я помогу вам записывать заметки в ваш Notion Inbox.\n\n"
         "Для начала работы нужно:\n"
@@ -312,20 +321,43 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def check_and_show_intro(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Проверить нужно ли показать приветствие о новой функции."""
+async def check_and_show_changelog(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Проверить и показать changelog для новых версий.
+
+    Если версия пользователя < текущей версии:
+    - Показываем сообщение текущей версии (CHANGELOG[VERSION]['message'])
+    - Если версия < 1.1.0 - это новая функция нотификаций
+    - Обновляем версию пользователя
+    """
     user_id = update.effective_user.id
-    settings = db.get_notification_settings(user_id)
-    
-    if not settings.get('notification_intro_shown'):
-        await update.message.reply_text(
-            "🎉 Новая функция: Оповещения о неразобранном инбоксе!\n\n"
-            "Я могу отправлять вам уведомления с неотмеченными задачами "
-            "в выбранное время и дни недели.\n\n"
-            "Хотите настроить?",
-            reply_markup=get_yes_no_keyboard()
-        )
-        return SETTING_NOTIFICATIONS
+    user_version = db.get_user_version(user_id)
+    current_version = VERSION
+
+    # Проверяем есть ли новая версия
+    if is_newer_version(current_version, user_version):
+        logger.info(f"Пользователь {user_id}: версия {user_version} -> {current_version}")
+
+        # Проверяем нужно ли показать intro для нотификаций
+        if should_show_notifications_intro(user_version):
+            # Это первая версия с нотификациями - показываем специальное сообщение
+            await update.message.reply_text(
+                "🎉 Новая функция: Оповещения о неразобранном инбоксе!\n\n"
+                "Я могу отправлять вам уведомления с неотмеченными задачами "
+                "в выбранное время и дни недели.\n\n"
+                "Хотите настроить?",
+                reply_markup=get_yes_no_keyboard()
+            )
+            return SETTING_NOTIFICATIONS
+        else:
+            # Показываем общий changelog
+            changelog_msg = get_changelog_message(current_version)
+            if changelog_msg:
+                await update.message.reply_text(changelog_msg)
+
+        # Обновляем версию пользователя
+        db.set_user_version(user_id, current_version)
+
     return None
 
 
@@ -368,8 +400,8 @@ async def handle_notification_callback(update: Update, context: ContextTypes.DEF
         return WAITING_FOR_NOTIFICATION_TIME
     
     elif data == "notif_no":
-        # Отметить что приветствие показано, больше не показывать
-        db.mark_intro_shown(user_id)
+        # Отметить что приветствие показано (устанавливаем текущую версию)
+        db.set_user_version(user_id, VERSION)
         await query.edit_message_text(
             "Окей! Если передумаете - используйте команду /notifications"
         )
@@ -425,7 +457,7 @@ async def handle_notification_callback(update: Update, context: ContextTypes.DEF
         days = ','.join(context.user_data.get('selected_days', ['1', '2', '3', '4', '5']))
         
         db.save_notification_settings(user_id, True, time, days)
-        db.mark_intro_shown(user_id)
+        db.set_user_version(user_id, VERSION)
         
         # Запланировать в notification_manager
         notif_mgr = context.bot_data.get('notification_manager')
@@ -515,6 +547,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text)
 
 
+async def version_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать текущую версию бота."""
+    await update.message.reply_text(f"📦 Версия бота: {VERSION}")
+
+
 def main():
     """Главная функция запуска бота."""
     # Получаем токен бота из переменной окружения
@@ -572,6 +609,7 @@ def main():
     application.add_handler(CommandHandler('list', list_notes))
     application.add_handler(CommandHandler('reset', reset))
     application.add_handler(CommandHandler('help', help_command))
+    application.add_handler(CommandHandler('version', version_command))
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     )
