@@ -1,4 +1,4 @@
-.PHONY: up down update logs restart build clean status help check-docker install-docker start-docker
+.PHONY: up down update logs restart build rebuild clean status help check-docker install-docker start-docker
 
 # Определяем команду docker compose (поддержка старых и новых версий)
 DOCKER_COMPOSE := $(shell if command -v docker-compose >/dev/null 2>&1; then echo "docker-compose"; else echo "docker compose"; fi)
@@ -63,10 +63,13 @@ down:
 	$(DOCKER_COMPOSE) down
 	@echo "✅ Бот остановлен"
 
-# Обновление из git + пересборка + перезапуск
+# Обновление из git + полная пересборка + перезапуск
 update: check-docker
 	@echo "🔄 Обновление бота..."
-	@bash scripts/update.sh
+	@bash scripts/update.sh || true
+	@echo ""
+	@echo "🔨 Запуск полной пересборки..."
+	$(MAKE) rebuild
 
 # Просмотр логов в реальном времени
 logs: check-docker
@@ -84,6 +87,20 @@ build: check-docker
 	@echo "🔨 Сборка образа..."
 	$(DOCKER_COMPOSE) build --no-cache
 	@echo "✅ Образ собран"
+
+# Полная пересборка образа (при добавлении новых файлов)
+rebuild: check-docker
+	@echo "🔄 Полная пересборка образа..."
+	@echo "🛑 Остановка контейнера..."
+	$(DOCKER_COMPOSE) down
+	@echo "🗑️  Удаление старого образа..."
+	-docker rmi $$(docker images -q inbox_bot-bot 2>/dev/null) 2>/dev/null || true
+	@echo "🔨 Сборка нового образа..."
+	$(DOCKER_COMPOSE) build --no-cache
+	@echo "🚀 Запуск контейнера..."
+	$(DOCKER_COMPOSE) up -d
+	@echo "✅ Образ пересобран и запущен!"
+	@echo "📋 Просмотр логов: make logs"
 
 # Полная очистка
 clean: check-docker
@@ -109,6 +126,7 @@ help:
 	@echo "  make logs           - Просмотр логов"
 	@echo "  make restart        - Перезапуск без обновления"
 	@echo "  make build          - Пересборка образа"
+	@echo "  make rebuild        - Полная пересборка (при новых файлах)"
 	@echo "  make clean          - Полная очистка"
 	@echo "  make status         - Статус контейнера"
 	@echo "  make deploy         - Полное развёртывание"

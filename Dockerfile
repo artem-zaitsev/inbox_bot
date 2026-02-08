@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Копируем код приложения
-COPY bot.py database.py notion_api.py ./
+COPY bot.py database.py notion_api.py notifications.py version.py ./
 
 # Создаем директорию для базы данных (если нужно)
 RUN mkdir -p /app/data
