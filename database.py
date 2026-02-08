@@ -49,6 +49,10 @@ class Database:
                 notion_token TEXT,
                 page_id TEXT,
                 page_name TEXT,
+                notification_enabled BOOLEAN DEFAULT 0,
+                notification_time TEXT,
+                notification_days TEXT DEFAULT '1,2,3,4,5',
+                notification_intro_shown BOOLEAN DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -121,3 +125,71 @@ class Database:
         if self.conn:
             self.conn.close()
             self.conn = None
+
+    def save_notification_settings(self, user_id: int, enabled: bool, time: str, days: str):
+        """Сохранить настройки уведомлений."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE users
+            SET notification_enabled = ?, notification_time = ?, notification_days = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+        ''', (int(enabled), time, days, user_id))
+        
+        conn.commit()
+        logger.info(f"Настройки уведомлений сохранены для пользователя {user_id}")
+
+    def get_notification_settings(self, user_id: int) -> dict:
+        """Получить настройки уведомлений пользователя."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            'SELECT notification_enabled, notification_time, notification_days, notification_intro_shown FROM users WHERE user_id = ?',
+            (user_id,)
+        )
+        
+        row = cursor.fetchone()
+        if row:
+            return {
+                'notification_enabled': bool(row['notification_enabled']),
+                'notification_time': row['notification_time'],
+                'notification_days': row['notification_days'],
+                'notification_intro_shown': bool(row['notification_intro_shown'])
+            }
+        return {}
+
+    def mark_intro_shown(self, user_id: int):
+        """Отметить что приветствие о новой функции показано."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE users
+            SET notification_intro_shown = 1, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+        ''', (user_id,))
+        
+        conn.commit()
+        logger.info(f"Приветствие отмечено как показанное для пользователя {user_id}")
+
+    def get_users_with_notifications(self) -> list:
+        """Получить всех пользователей с включенными уведомлениями."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT user_id, notification_time, notification_days 
+            FROM users 
+            WHERE notification_enabled = 1 AND notification_time IS NOT NULL
+        ''')
+        
+        return [
+            {
+                'user_id': row['user_id'],
+                'notification_time': row['notification_time'],
+                'notification_days': row['notification_days']
+            }
+            for row in cursor.fetchall()
+        ]

@@ -5,18 +5,20 @@ Telegram бот для записи сообщений в Notion Inbox стра�
 
 import logging
 import os
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
     ConversationHandler,
+    CallbackQueryHandler,
     filters,
     ContextTypes,
 )
 
 from database import Database
 from notion_api import NotionClient
+from notifications import NotificationManager
 
 # Настройка логирования
 logging.basicConfig(
@@ -27,10 +29,76 @@ logger = logging.getLogger(__name__)
 
 # Состояния для ConversationHandler
 WAITING_FOR_NOTION_TOKEN, WAITING_FOR_PAGE = range(2)
+SETTING_NOTIFICATIONS, WAITING_FOR_NOTIFICATION_TIME, WAITING_FOR_NOTIFICATION_DAYS = range(3, 6)
 
 # Инициализация базы данных и Notion клиента
 db = Database()
 notion_client = NotionClient()
+notification_manager = None  # Инициализируется в main()
+
+
+def get_time_keyboard():
+    """Клавиатура с выбором времени (07:00-22:00, шаг 1 час)."""
+    keyboard = []
+    times = ["07:00", "08:00", "09:00", "10:00", "11:00", "12:00",
+             "13:00", "14:00", "15:00", "16:00", "17:00", "18:00",
+             "19:00", "20:00", "21:00", "22:00"]
+    # По 4 кнопки в ряд
+    for i in range(0, len(times), 4):
+        row = [InlineKeyboardButton(t, callback_data=f"time_{t}") for t in times[i:i+4]]
+        keyboard.append(row)
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_days_keyboard(selected_days=None):
+    """Клавиатура с выбором дней недели (множественный выбор)."""
+    if selected_days is None:
+        selected_days = ['1', '2', '3', '4', '5']  # По умолчанию пн-пт
+    
+    days = [("Пн", "1"), ("Вт", "2"), ("Ср", "3"), ("Чт", "4"), 
+            ("Пт", "5"), ("Сб", "6"), ("Вс", "7")]
+    
+    keyboard = []
+    for name, value in days:
+        prefix = "✅ " if value in selected_days else "☐ "
+        keyboard.append([InlineKeyboardButton(f"{prefix}{name}", 
+                                            callback_data=f"day_toggle_{value}")])
+    
+    keyboard.append([InlineKeyboardButton("✅ Готово", callback_data="days_done")])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_yes_no_keyboard():
+    """Клавиатура Да/Нет."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Да", callback_data="notif_yes"),
+         InlineKeyboardButton("Нет, спасибо", callback_data="notif_no")]
+    ])
+
+
+def format_days(days_str):
+    """Форматировать дни недели для отображения."""
+    if not days_str:
+        return "Не выбраны"
+    days_map = {
+        '1': 'Пн', '2': 'Вт', '3': 'Ср', '4': 'Чт',
+        '5': 'Пт', '6': 'Сб', '7': 'Вс'
+    }
+    days_list = days_str.split(',')
+    result = []
+    for d in days_list:
+        day_name = days_map.get(d)
+        if day_name:
+            result.append(day_name)
+    return ', '.join(result)
+
+
+def get_notifications_actions_keyboard():
+    """Клавиатура действий для уведомлений."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📝 Изменить", callback_data="notif_change"),
+         InlineKeyboardButton("🔕 Отключить", callback_data="notif_disable")]
+    ])
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -244,6 +312,138 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def check_and_show_intro(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Проверить нужно ли показать приветствие о новой функции."""
+    user_id = update.effective_user.id
+    settings = db.get_notification_settings(user_id)
+    
+    if not settings.get('notification_intro_shown'):
+        await update.message.reply_text(
+            "🎉 Новая функция: Оповещения о неразобранном инбоксе!\n\n"
+            "Я могу отправлять вам уведомления с неотмеченными задачами "
+            "в выбранное время и дни недели.\n\n"
+            "Хотите настроить?",
+            reply_markup=get_yes_no_keyboard()
+        )
+        return SETTING_NOTIFICATIONS
+    return None
+
+
+async def notifications_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать текущие настройки уведомлений."""
+    user_id = update.effective_user.id
+    settings = db.get_notification_settings(user_id)
+    
+    if not settings.get('notification_enabled'):
+        await update.message.reply_text(
+            "🔕 Уведомления выключены.\n\n"
+            "Хотите настроить рассылку о неразобранном инбоксе?",
+            reply_markup=get_yes_no_keyboard()
+        )
+    else:
+        await update.message.reply_text(
+            f"📬 Настройки уведомлений:\n\n"
+            f"Статус: ✅ Включены\n"
+            f"Время: {settings.get('notification_time', 'Не установлено')}\n"
+            f"Дни: {format_days(settings.get('notification_days', ''))}\n\n"
+            f"Хотите изменить настройки?",
+            reply_markup=get_notifications_actions_keyboard()
+        )
+    return SETTING_NOTIFICATIONS
+
+
+async def handle_notification_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка inline-кнопок для уведомлений."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    user_id = update.effective_user.id
+    
+    if data == "notif_yes":
+        # Показать выбор времени
+        await query.edit_message_text(
+            "Выберите время для рассылки:",
+            reply_markup=get_time_keyboard()
+        )
+        return WAITING_FOR_NOTIFICATION_TIME
+    
+    elif data == "notif_no":
+        # Отметить что приветствие показано, больше не показывать
+        db.mark_intro_shown(user_id)
+        await query.edit_message_text(
+            "Окей! Если передумаете - используйте команду /notifications"
+        )
+        return ConversationHandler.END
+    
+    elif data == "notif_change":
+        # Показать выбор времени
+        await query.edit_message_text(
+            "Выберите время для рассылки:",
+            reply_markup=get_time_keyboard()
+        )
+        return WAITING_FOR_NOTIFICATION_TIME
+    
+    elif data == "notif_disable":
+        # Отключить уведомления
+        db.save_notification_settings(user_id, False, None, None)
+        notification_manager.update_user_schedule(user_id, False, None, None)
+        await query.edit_message_text(
+            "🔕 Уведомления отключены.\n\n"
+            "Используйте /notifications чтобы включить снова."
+        )
+        return ConversationHandler.END
+    
+    elif data.startswith("time_"):
+        # Сохранить время, показать выбор дней
+        time = data.replace("time_", "")
+        context.user_data['notification_time'] = time
+        context.user_data['selected_days'] = ['1', '2', '3', '4', '5']  # По умолчанию пн-пт
+        await query.edit_message_text(
+            "Выберите дни недели для рассылки:",
+            reply_markup=get_days_keyboard(context.user_data['selected_days'])
+        )
+        return WAITING_FOR_NOTIFICATION_DAYS
+    
+    elif data.startswith("day_toggle_"):
+        # Переключить день, обновить клавиатуру
+        day = data.replace("day_toggle_", "")
+        selected = context.user_data.get('selected_days', ['1', '2', '3', '4', '5'])
+        if day in selected:
+            selected.remove(day)
+        else:
+            selected.append(day)
+        context.user_data['selected_days'] = selected
+        await query.edit_message_text(
+            "Выберите дни недели для рассылки:",
+            reply_markup=get_days_keyboard(selected)
+        )
+        return WAITING_FOR_NOTIFICATION_DAYS
+    
+    elif data == "days_done":
+        # Сохранить все настройки
+        time = context.user_data.get('notification_time')
+        days = ','.join(context.user_data.get('selected_days', ['1', '2', '3', '4', '5']))
+        
+        db.save_notification_settings(user_id, True, time, days)
+        db.mark_intro_shown(user_id)
+        
+        # Запланировать в notification_manager
+        notif_mgr = context.bot_data.get('notification_manager')
+        if notif_mgr:
+            notif_mgr.update_user_schedule(user_id, True, time, days)
+        
+        await query.edit_message_text(
+            f"✅ Уведомления настроены!\n\n"
+            f"⏰ Время: {time}\n"
+            f"📅 Дни: {format_days(days)}\n\n"
+            f"Я буду присылать список неотмеченных задач по расписанию.\n"
+            f"Используйте /notifications для изменения настроек."
+        )
+        return ConversationHandler.END
+    
+    return ConversationHandler.END
+
+
 async def list_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать список заметок из Notion."""
     user_id = update.effective_user.id
@@ -305,6 +505,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Команды:\n"
         "• /start - Начать настройку бота\n"
         "• /list - Показать последние 20 заметок\n"
+        "• /notifications - Настроить уведомления о неразобранном инбоксе\n"
         "• /reset - Сбросить текущую конфигурацию\n"
         "• /help - Показать эту справку\n\n"
         "Использование:\n"
@@ -327,6 +528,13 @@ def main():
     # Создаем приложение
     application = Application.builder().token(bot_token).build()
     
+    # Инициализируем менеджер уведомлений
+    notification_manager = NotificationManager(db, notion_client, application.bot)
+    notification_manager.start()
+    
+    # Сохраняем в bot_data для доступа из обработчиков
+    application.bot_data['notification_manager'] = notification_manager
+    
     # Создаем ConversationHandler для настройки
     setup_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
@@ -341,8 +549,26 @@ def main():
         fallbacks=[CommandHandler('cancel', cancel)],
     )
     
+    # Создаем ConversationHandler для настройки уведомлений
+    notifications_handler = ConversationHandler(
+        entry_points=[CommandHandler('notifications', notifications_command)],
+        states={
+            SETTING_NOTIFICATIONS: [
+                CallbackQueryHandler(handle_notification_callback, pattern='^(notif_|notif_change|notif_disable)')
+            ],
+            WAITING_FOR_NOTIFICATION_TIME: [
+                CallbackQueryHandler(handle_notification_callback, pattern='^time_')
+            ],
+            WAITING_FOR_NOTIFICATION_DAYS: [
+                CallbackQueryHandler(handle_notification_callback, pattern='^(day_toggle_|days_done)')
+            ],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    )
+    
     # Регистрируем обработчики
     application.add_handler(setup_handler)
+    application.add_handler(notifications_handler)
     application.add_handler(CommandHandler('list', list_notes))
     application.add_handler(CommandHandler('reset', reset))
     application.add_handler(CommandHandler('help', help_command))
