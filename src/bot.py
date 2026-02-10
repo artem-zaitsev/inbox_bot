@@ -16,10 +16,10 @@ from telegram.ext import (
     ContextTypes,
 )
 
-from database import Database
-from notion_api import NotionClient
-from notifications import NotificationManager
-from version import VERSION, is_newer_version, should_show_notifications_intro, get_changelog_message
+from src.database import Database
+from src.notion_api import NotionClient
+from src.notifications import NotificationManager
+from src.version import VERSION, is_newer_version, should_show_notifications_intro, get_changelog_message
 
 # Настройка логирования
 logging.basicConfig(

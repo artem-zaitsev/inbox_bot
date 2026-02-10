@@ -13,7 +13,7 @@ load_dotenv()
 
 def get_notion_client():
     """Получить клиент Notion с токеном из .env файла или переменной окружения."""
-    from notion_api import NotionClient
+    from src.notion_api import NotionClient
     
     token = os.getenv("NOTION_TEST_TOKEN")
     if not token:

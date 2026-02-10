@@ -7,8 +7,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from telegram import Bot
 
-from database import Database
-from notion_api import NotionClient
+from src.database import Database
+from src.notion_api import NotionClient
 
 logger = logging.getLogger(__name__)
 

@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Копируем код приложения
-COPY bot.py database.py notion_api.py notifications.py version.py ./
+COPY src/ ./src/
 
 # Создаем директорию для базы данных (если нужно)
 RUN mkdir -p /app/data
@@ -27,6 +27,7 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV DOCKER_ENV=true
 ENV DATA_DIR=/app/data
+ENV PYTHONPATH=/app
 
 # Запускаем бота
-CMD ["python", "bot.py"]
+CMD ["python", "-m", "src.bot"]
