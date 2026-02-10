@@ -64,6 +64,7 @@ class Database:
         self.migrate_add_notification_fields()
         self.migrate_add_version_field()
         self.migrate_from_intro_shown()
+        self.migrate_add_timezone_field()
 
         logger.info("База данных инициализирована")
     
@@ -132,16 +133,16 @@ class Database:
             self.conn.close()
             self.conn = None
 
-    def save_notification_settings(self, user_id: int, enabled: bool, time: str, days: str):
+    def save_notification_settings(self, user_id: int, enabled: bool, time: str, days: str, timezone_offset: int = None):
         """Сохранить настройки уведомлений."""
         conn = self.get_connection()
         cursor = conn.cursor()
         
         cursor.execute('''
             UPDATE users
-            SET notification_enabled = ?, notification_time = ?, notification_days = ?, updated_at = CURRENT_TIMESTAMP
+            SET notification_enabled = ?, notification_time = ?, notification_days = ?, timezone_offset = ?, updated_at = CURRENT_TIMESTAMP
             WHERE user_id = ?
-        ''', (int(enabled), time, days, user_id))
+        ''', (int(enabled), time, days, timezone_offset, user_id))
         
         conn.commit()
         logger.info(f"Настройки уведомлений сохранены для пользователя {user_id}")
@@ -152,7 +153,7 @@ class Database:
         cursor = conn.cursor()
         
         cursor.execute(
-            'SELECT notification_enabled, notification_time, notification_days, last_seen_version FROM users WHERE user_id = ?',
+            'SELECT notification_enabled, notification_time, notification_days, last_seen_version, timezone_offset FROM users WHERE user_id = ?',
             (user_id,)
         )
         
@@ -162,7 +163,8 @@ class Database:
                 'notification_enabled': bool(row['notification_enabled']),
                 'notification_time': row['notification_time'],
                 'notification_days': row['notification_days'],
-                'last_seen_version': row['last_seen_version']
+                'last_seen_version': row['last_seen_version'],
+                'timezone_offset': row['timezone_offset']
             }
         return {}
 
@@ -201,7 +203,7 @@ class Database:
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT user_id, notification_time, notification_days 
+            SELECT user_id, notification_time, notification_days, timezone_offset
             FROM users 
             WHERE notification_enabled = 1 AND notification_time IS NOT NULL
         ''')
@@ -210,7 +212,8 @@ class Database:
             {
                 'user_id': row['user_id'],
                 'notification_time': row['notification_time'],
-                'notification_days': row['notification_days']
+                'notification_days': row['notification_days'],
+                'timezone_offset': row['timezone_offset']
             }
             for row in cursor.fetchall()
         ]
@@ -305,3 +308,16 @@ class Database:
             cursor.execute('ALTER TABLE users_new RENAME TO users')
             conn.commit()
             logger.info("Миграция notification_intro_shown -> last_seen_version завершена")
+
+    def migrate_add_timezone_field(self):
+        """Миграция: добавить поле timezone_offset."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [row['name'] for row in cursor.fetchall()]
+        
+        if 'timezone_offset' not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN timezone_offset INTEGER")
+            conn.commit()
+            logger.info("Добавлено поле timezone_offset")

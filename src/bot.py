@@ -37,6 +37,7 @@ from src.handlers import (
     SETTING_NOTIFICATIONS,
     WAITING_FOR_NOTIFICATION_TIME,
     WAITING_FOR_NOTIFICATION_DAYS,
+    WAITING_FOR_TIMEZONE,
 )
 
 # Настройка логирования
@@ -91,6 +92,9 @@ def main():
         states={
             SETTING_NOTIFICATIONS: [
                 CallbackQueryHandler(handle_notification_callback, pattern='^(notif_|notif_change|notif_disable)')
+            ],
+            WAITING_FOR_TIMEZONE: [
+                CallbackQueryHandler(handle_notification_callback, pattern='^tz_')
             ],
             WAITING_FOR_NOTIFICATION_TIME: [
                 CallbackQueryHandler(handle_notification_callback, pattern='^time_')

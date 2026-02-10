@@ -16,6 +16,11 @@ from src.utils import (
     get_yes_no_keyboard,
     format_days,
     get_notifications_actions_keyboard,
+    get_timezone_keyboard,
+    gmt_to_offset_seconds,
+    offset_seconds_to_gmt,
+    local_time_to_utc,
+    utc_time_to_local,
 )
 from src.version import VERSION, is_newer_version, should_show_notifications_intro, get_changelog_message
 
@@ -23,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Conversation states
 WAITING_FOR_NOTION_TOKEN, WAITING_FOR_PAGE = range(2)
-SETTING_NOTIFICATIONS, WAITING_FOR_NOTIFICATION_TIME, WAITING_FOR_NOTIFICATION_DAYS = range(3, 6)
+SETTING_NOTIFICATIONS, WAITING_FOR_NOTIFICATION_TIME, WAITING_FOR_NOTIFICATION_DAYS, WAITING_FOR_TIMEZONE = range(3, 7)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -291,21 +296,34 @@ async def notifications_command(update: Update, context: ContextTypes.DEFAULT_TY
     settings = db.get_notification_settings(user_id)
     
     if not settings.get('notification_enabled'):
+        # Если уведомления выключены - показываем кнопки Да/Нет
         await update.message.reply_text(
             "🔕 Уведомления выключены.\n\n"
             "Хотите настроить рассылку о неразобранном инбоксе?",
             reply_markup=get_yes_no_keyboard()
         )
+        return SETTING_NOTIFICATIONS
     else:
+        # Уведомления включены - показываем текущие настройки
+        timezone_offset = settings.get('timezone_offset')
+        utc_time = settings.get('notification_time', 'Не установлено')
+        
+        # Конвертируем UTC время в локальное для отображения
+        if timezone_offset and utc_time != 'Не установлено':
+            local_time = utc_time_to_local(utc_time, timezone_offset)
+            time_display = f"{local_time} ({offset_seconds_to_gmt(timezone_offset)})"
+        else:
+            time_display = utc_time
+        
         await update.message.reply_text(
             f"📬 Настройки уведомлений:\n\n"
             f"Статус: ✅ Включены\n"
-            f"Время: {settings.get('notification_time', 'Не установлено')}\n"
+            f"Время: {time_display}\n"
             f"Дни: {format_days(settings.get('notification_days', ''))}\n\n"
             f"Хотите изменить настройки?",
             reply_markup=get_notifications_actions_keyboard()
         )
-    return SETTING_NOTIFICATIONS
+        return SETTING_NOTIFICATIONS
 
 
 async def handle_notification_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -316,12 +334,22 @@ async def handle_notification_callback(update: Update, context: ContextTypes.DEF
     user_id = update.effective_user.id
     
     if data == "notif_yes":
-        # Показать выбор времени
-        await query.edit_message_text(
-            "Выберите время для рассылки:",
-            reply_markup=get_time_keyboard()
-        )
-        return WAITING_FOR_NOTIFICATION_TIME
+        # Проверяем, выбран ли уже часовой пояс
+        settings = db.get_notification_settings(user_id)
+        if settings.get('timezone_offset') is None:
+            # Новый пользователь - сначала выбираем таймзону
+            await query.edit_message_text(
+                "Выберите ваш часовой пояс:",
+                reply_markup=get_timezone_keyboard()
+            )
+            return WAITING_FOR_TIMEZONE
+        else:
+            # Таймзона уже выбрана - показываем выбор времени
+            await query.edit_message_text(
+                "Выберите время для рассылки:",
+                reply_markup=get_time_keyboard()
+            )
+            return WAITING_FOR_NOTIFICATION_TIME
     
     elif data == "notif_no":
         # Отметить что приветствие показано (устанавливаем текущую версию)
@@ -332,12 +360,22 @@ async def handle_notification_callback(update: Update, context: ContextTypes.DEF
         return ConversationHandler.END
     
     elif data == "notif_change":
-        # Показать выбор времени
-        await query.edit_message_text(
-            "Выберите время для рассылки:",
-            reply_markup=get_time_keyboard()
-        )
-        return WAITING_FOR_NOTIFICATION_TIME
+        # Проверяем, выбран ли уже часовой пояс
+        settings = db.get_notification_settings(user_id)
+        if settings.get('timezone_offset') is None:
+            # Таймзона не выбрана - сначала выбираем
+            await query.edit_message_text(
+                "Выберите ваш часовой пояс:",
+                reply_markup=get_timezone_keyboard()
+            )
+            return WAITING_FOR_TIMEZONE
+        else:
+            # Таймзона уже выбрана - показываем выбор времени
+            await query.edit_message_text(
+                "Выберите время для рассылки:",
+                reply_markup=get_time_keyboard()
+            )
+            return WAITING_FOR_NOTIFICATION_TIME
     
     elif data == "notif_disable":
         # Отключить уведомления
@@ -348,6 +386,19 @@ async def handle_notification_callback(update: Update, context: ContextTypes.DEF
             "Используйте /notifications чтобы включить снова."
         )
         return ConversationHandler.END
+    
+    elif data.startswith("tz_"):
+        # Сохранить выбранный часовой пояс
+        gmt_offset = int(data.replace("tz_", ""))
+        timezone_offset = gmt_to_offset_seconds(gmt_offset)
+        context.user_data['timezone_offset'] = timezone_offset
+        
+        await query.edit_message_text(
+            f"✅ Выбран часовой пояс: {offset_seconds_to_gmt(timezone_offset)}\n\n"
+            "Теперь выберите время для рассылки:",
+            reply_markup=get_time_keyboard()
+        )
+        return WAITING_FOR_NOTIFICATION_TIME
     
     elif data.startswith("time_"):
         # Сохранить время, показать выбор дней
@@ -377,20 +428,30 @@ async def handle_notification_callback(update: Update, context: ContextTypes.DEF
     
     elif data == "days_done":
         # Сохранить все настройки
-        time = context.user_data.get('notification_time')
+        local_time = context.user_data.get('notification_time')
         days = ','.join(context.user_data.get('selected_days', ['1', '2', '3', '4', '5']))
+        timezone_offset = context.user_data.get('timezone_offset')
         
-        db.save_notification_settings(user_id, True, time, days)
+        # Конвертируем локальное время в UTC
+        if timezone_offset:
+            utc_time = local_time_to_utc(local_time, timezone_offset)
+        else:
+            utc_time = local_time  # Для старых пользователей без таймзоны
+        
+        db.save_notification_settings(user_id, True, utc_time, days, timezone_offset)
         db.set_user_version(user_id, VERSION)
         
-        # Запланировать в notification_manager
+        # Запланировать в notification_manager (используем UTC время)
         notif_mgr = context.bot_data.get('notification_manager')
         if notif_mgr:
-            notif_mgr.update_user_schedule(user_id, True, time, days)
+            notif_mgr.update_user_schedule(user_id, True, utc_time, days)
+        
+        # Для отображения используем локальное время
+        time_display = f"{local_time} ({offset_seconds_to_gmt(timezone_offset)})" if timezone_offset else local_time
         
         await query.edit_message_text(
             f"✅ Уведомления настроены!\n\n"
-            f"⏰ Время: {time}\n"
+            f"⏰ Время: {time_display}\n"
             f"📅 Дни: {format_days(days)}\n\n"
             f"Я буду присылать список неотмеченных задач по расписанию.\n"
             f"Используйте /notifications для изменения настроек."

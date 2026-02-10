@@ -7,6 +7,88 @@ used across the bot handlers.
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 
 
+def get_timezone_keyboard():
+    """Клавиатура с выбором часового пояса (GMT-12 до GMT+14)."""
+    keyboard = []
+    # Создаем список GMT от -12 до +14
+    gmt_values = list(range(-12, 15))  # -12, -11, ..., 0, ..., 14
+    
+    # По 5 кнопок в ряд
+    for i in range(0, len(gmt_values), 5):
+        row = []
+        for offset in gmt_values[i:i+5]:
+            if offset >= 0:
+                label = f"GMT+{offset}"
+            else:
+                label = f"GMT{offset}"
+            row.append(InlineKeyboardButton(label, callback_data=f"tz_{offset}"))
+        keyboard.append(row)
+    
+    return InlineKeyboardMarkup(keyboard)
+
+
+def gmt_to_offset_seconds(gmt_offset: int) -> int:
+    """Конвертировать GMT offset в секунды.
+    
+    Args:
+        gmt_offset: Например, 3 для GMT+3, -5 для GMT-5
+        
+    Returns:
+        Смещение в секундах
+    """
+    return gmt_offset * 3600
+
+
+def offset_seconds_to_gmt(offset_seconds: int) -> str:
+    """Конвертировать смещение в секундах в строку GMT.
+    
+    Args:
+        offset_seconds: Смещение в секундах
+        
+    Returns:
+        Строка типа "GMT+3" или "GMT-5"
+    """
+    if offset_seconds is None:
+        return "UTC"
+    hours = offset_seconds // 3600
+    if hours >= 0:
+        return f"GMT+{hours}"
+    else:
+        return f"GMT{hours}"
+
+
+def local_time_to_utc(time_str: str, timezone_offset: int) -> str:
+    """Конвертировать локальное время в UTC.
+    
+    Args:
+        time_str: Время в формате "HH:MM"
+        timezone_offset: Смещение в секундах (например, 10800 для GMT+3)
+        
+    Returns:
+        Время в UTC в формате "HH:MM"
+    """
+    hour, minute = map(int, time_str.split(':'))
+    offset_hours = timezone_offset // 3600
+    utc_hour = (hour - offset_hours) % 24
+    return f"{utc_hour:02d}:{minute:02d}"
+
+
+def utc_time_to_local(time_str: str, timezone_offset: int) -> str:
+    """Конвертировать UTC время в локальное.
+    
+    Args:
+        time_str: Время в формате "HH:MM" (UTC)
+        timezone_offset: Смещение в секундах (например, 10800 для GMT+3)
+        
+    Returns:
+        Локальное время в формате "HH:MM"
+    """
+    hour, minute = map(int, time_str.split(':'))
+    offset_hours = timezone_offset // 3600
+    local_hour = (hour + offset_hours) % 24
+    return f"{local_hour:02d}:{minute:02d}"
+
+
 def get_time_keyboard():
     """Клавиатура с выбором времени (07:00-22:00, шаг 1 час)."""
     keyboard = []
