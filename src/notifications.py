@@ -2,7 +2,10 @@
 Модуль для управления уведомлениями о неразобранном инбоксе.
 """
 
+import asyncio
 import logging
+from typing import Any
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from telegram import Bot
@@ -92,8 +95,15 @@ class NotificationManager:
             self.notion.set_token(config['notion_token'])
 
             # Получаем все to_do блоки со страницы
-            blocks = self.notion.client.blocks.children.list(config['page_id'])
-            results = blocks.get('results', [])
+            if not self.notion.client:
+                logger.warning(f"Notion клиент не инициализирован для пользователя {user_id}")
+                return
+            
+            blocks: Any = await asyncio.to_thread(
+                self.notion.client.blocks.children.list,
+                config['page_id']
+            )
+            results = blocks.get('results', []) if blocks else []
 
             # Фильтруем только невыполненные to_do
             unchecked_items = []
@@ -107,7 +117,7 @@ class NotificationManager:
 
             # Формируем сообщение
             if not unchecked_items:
-                message = "🎉 Ваш инбокс пуст! Вы молодец!"
+                message = "🤔 Инбокс пуст. Вы не забыли ничего записать?"
             else:
                 lines = [f"📬 Неразобранный инбокс ({len(unchecked_items)} задачи):\n"]
                 for item in unchecked_items:
@@ -116,7 +126,7 @@ class NotificationManager:
                 message = "\n".join(lines)
 
             # Отправляем сообщение
-            await self.bot.send_message(chat_id=user_id, text=message)
+            await self.bot.send_message(chat_id=user_id, text=message)  # type: ignore
             logger.info(f"Отправлено уведомление пользователю {user_id}")
 
         except Exception as e:
