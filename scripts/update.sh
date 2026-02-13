@@ -8,20 +8,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# Определяем команду docker compose (поддержка старых и новых версий)
-if command -v docker-compose &> /dev/null; then
-    DOCKER_COMPOSE="docker-compose"
-elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
-    DOCKER_COMPOSE="docker compose"
-else
-    echo -e "${RED}❌ Docker Compose не найден!${NC}"
-    echo -e "${YELLOW}💡 Установите Docker Compose:${NC}"
-    echo "   https://docs.docker.com/compose/install/"
-    exit 1
-fi
-
-echo -e "${YELLOW}🔄 Начало обновления...${NC}"
-echo -e "${YELLOW}🐳 Используется команда: ${DOCKER_COMPOSE}${NC}"
+echo -e "${YELLOW}🔄 Начало обновления из git...${NC}"
 
 # Проверка наличия .env
 if [ ! -f .env ]; then
@@ -48,6 +35,7 @@ git fetch origin
 # Проверяем, есть ли изменения
 if git diff --quiet HEAD origin/main 2>/dev/null || git diff --quiet HEAD origin/master 2>/dev/null; then
     echo -e "${GREEN}✅ Код актуален, изменений нет${NC}"
+    exit 0
 else
     echo -e "${YELLOW}📦 Обнаружены изменения, обновляем...${NC}"
     
@@ -57,37 +45,7 @@ else
     # Pull изменений
     git pull origin $BRANCH
     
-    echo -e "${GREEN}✅ Код обновлён${NC}"
-    
-    # Пересобираем образ
-    echo -e "${YELLOW}🔨 Пересборка Docker образа...${NC}"
-    $DOCKER_COMPOSE build --no-cache
-    
-    echo -e "${GREEN}✅ Образ пересобран${NC}"
-fi
-
-# Перезапускаем контейнер
-echo -e "${YELLOW}🔄 Перезапуск контейнера...${NC}"
-$DOCKER_COMPOSE down
-$DOCKER_COMPOSE up -d
-
-# Проверяем статус
-echo -e "${YELLOW}⏳ Ожидание запуска...${NC}"
-sleep 3
-
-if $DOCKER_COMPOSE ps | grep -q "Up"; then
-    echo -e "${GREEN}✅ Бот успешно запущен!${NC}"
-    echo ""
-    echo -e "${YELLOW}📊 Статус контейнера:${NC}"
-    $DOCKER_COMPOSE ps
-    echo ""
-    echo -e "${YELLOW}📋 Логи (последние 10 строк):${NC}"
-    $DOCKER_COMPOSE logs --tail=10 bot
-    echo ""
-    echo -e "${GREEN}💡 Для просмотра логов в реальном времени: make logs${NC}"
-else
-    echo -e "${RED}❌ Ошибка запуска контейнера!${NC}"
-    echo -e "${YELLOW}📋 Логи ошибок:${NC}"
-    $DOCKER_COMPOSE logs bot
-    exit 1
+    echo -e "${GREEN}✅ Код обновлён из git${NC}"
+    echo -e "${YELLOW}🔨 Docker-операции будут выполнены через Makefile${NC}"
+    exit 0
 fi
